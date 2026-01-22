@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="ar">
+<head>
+<meta charset="UTF-8">
+<title>نظام أمني – تسجيل دخول الموظفين + البلاغات</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<style>
+html, body { margin:0; height:100%; font-family:Arial, sans-serif; }
+#loginDiv, #mapDiv { width:100%; height:100%; display:flex; align-items:center; justify-content:center; flex-direction:column; }
+#loginDiv { background:#f0f0f0; }
+input { padding:10px; margin:5px; font-size:16px; border-radius:5px; border:1px solid #ccc; }
+button { padding:10px 20px; font-size:16px; border:none; border-radius:5px; background:#007bff; color:white; cursor:pointer; }
+#reportBtn { position:absolute; top:10px; left:10px; z-index:1000; }
+#map { width:100%; height:100%; }
+.site-marker { background:#007bff; color:white; padding:6px 10px; border-radius:8px; font-size:13px; font-weight:bold; box-shadow:0 0 10px rgba(0,123,255,0.8);}
+.alert-circle { width:30px; height:30px; border-radius:50%; color:white; font-weight:bold; font-size:14px; display:flex; align-items:center; justify-content:center; position:relative; text-align:center; animation:pulse 1.5s infinite;}
+.alert-circle::before { content:""; position:absolute; inset:-12px; border-radius:50%; background: rgba(255,255,0,0.6); animation:glow 1.5s infinite; z-index:-1;}
+@keyframes pulse {0%{transform:scale(1);}50%{transform:scale(1.4);}100%{transform:scale(1);}}
+@keyframes glow {0%{transform:scale(0.7); opacity:0.6;}50%{transform:scale(1.5); opacity:0.4;}100%{transform:scale(1.8); opacity:0;}}
+</style>
+</head>
+<body>
+
+<div id="loginDiv">
+    <h2>تسجيل دخول الموظف</h2>
+    <input type="text" id="username" placeholder="اسم المستخدم">
+    <input type="password" id="password" placeholder="كلمة المرور">
+    <button id="loginBtn">تسجيل الدخول</button>
+    <p id="loginMsg" style="color:red;"></p>
+</div>
+
+<div id="mapDiv" style="display:none;">
+    <button id="reportBtn">تفعيل البلاغ</button>
+    <div id="map"></div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+// =======================
+// بيانات الموظفين للتجربة
+// =======================
+const users = {
+    "ahmed":"12345",
+    "fatima":"abcde",
+    "khalid":"password"
+};
+let currentUser = null;
+
+// =======================
+// تسجيل الدخول
+// =======================
+document.getElementById('loginBtn').addEventListener('click', function(){
+    const u = document.getElementById('username').value;
+    const p = document.getElementById('password').value;
+    if(users[u] && users[u]===p){
+        currentUser = u;
+        document.getElementById('loginDiv').style.display="none";
+        document.getElementById('mapDiv').style.display="block";
+        initMap(); // فتح الخريطة بعد تسجيل الدخول
+    } else {
+        document.getElementById('loginMsg').textContent="اسم المستخدم أو كلمة المرور خاطئة";
+    }
+});
+
+// =======================
+// البلاغات + الخريطة
+// =======================
+var hazardPoints = {};
+var markers = {};
+var reporting = false;
+
+function getColor(count){
+    if(count===1) return "yellow";
+    else if(count<=6) return "orange";
+    else return "red";
+}
+function getGlowColor(count){
+    if(count===1) return "rgba(255,255,0,0.6)";
+    else if(count<=6) return "rgba(255,165,0,0.6)";
+    else return "rgba(255,0,0,0.6)";
+}
+function distance(lat1,lng1,lat2,lng2){
+    const R=6371000;
+    const toRad = x=>x*Math.PI/180;
+    const dLat = toRad(lat2-lat1);
+    const dLng = toRad(lng2-lng1);
+    const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLng/2)**2;
+    const c = 2*Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    return R*c;
+}
+
+function initMap(){
+    const map = L.map('map').setView([25.6254570, 37.0837628], 16);
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap contributors',
+        maxZoom: 19
+    }).addTo(map);
+
+    // تفعيل وضع البلاغ
+    document.getElementById('reportBtn').addEventListener('click', function(){
+        reporting = true;
+        alert("تم تفعيل وضع البلاغ. اضغط على أي مكان بالمطار لتسجيله.");
+    });
+
+    // الضغط على الخريطة لتسجيل البلاغ
+    map.on('click', function(e){
+        if(!reporting) return;
+        var latlng = e.latlng;
+        createOrUpdateMarker(latlng, map);
+        reporting = false;
+    });
+
+    // إضافة المطار كموقع رئيسي
+    L.marker([25.6254570,37.0837628],{
+        icon:L.divIcon({
+            html:`<div class="site-marker">✈️ مطار البحر الأحمر</div>`,
+            iconSize:[200,40],
+            className:''
+        })
+    }).addTo(map);
+}
+
+// إنشاء أو تحديث Marker
+function createOrUpdateMarker(latlng, map){
+    var foundKey = null;
+    for(var key in markers){
+        var coords = key.split(",");
+        var lat=parseFloat(coords[0]);
+        var lng=parseFloat(coords[1]);
+        if(distance(latlng.lat,latlng.lng,lat,lng)<=15){
+            foundKey = key;
+            break;
+        }
+    }
+
+    if(foundKey){
+        hazardPoints[foundKey]++;
+        var count = hazardPoints[foundKey];
+        const el = markers[foundKey].getElement().querySelector('.alert-circle');
+        if(el){
+            el.style.background = getColor(count);
+            el.style.boxShadow = `0 0 20px ${getColor(count)}`;
+            el.textContent = count;
+        }
+        markers[foundKey].bindPopup("Hazard Reports: "+count+" | بواسطة: "+currentUser);
+    } else {
+        var key = latlng.lat.toFixed(5)+","+latlng.lng.toFixed(5);
+        hazardPoints[key]=1;
+
+        var icon = L.divIcon({
+            className:'',
+            html:`<div class="alert-circle" style="background:yellow; color:black;">1</div>`,
+            iconSize:[30,30]
+        });
+
+        var marker = L.marker([latlng.lat,latlng.lng],{icon}).addTo(map);
+        marker.bindPopup("Hazard Reports: 1 | بواسطة: "+currentUser);
+        markers[key]=marker;
+
+        // تحديث عند الضغط على Marker نفسه
+        marker.on('click', function(){
+            hazardPoints[key]++;
+            var count = hazardPoints[key];
+            const el = marker.getElement().querySelector('.alert-circle');
+            if(el){
+                el.style.background=getColor(count);
+                el.style.boxShadow=`0 0 20px ${getColor(count)}`;
+                el.textContent=count;
+            }
+            marker.bindPopup("Hazard Reports: "+count+" | بواسطة: "+currentUser);
+        });
+    }
+}
+</script>
+</body>
+</html>
